@@ -39,13 +39,6 @@ void db_core::load_database(const char *filename)
         return;
     }
 
-    if (database->reserved != 0)
-    {
-        error_log("Database reserved byte mismatch");
-        delete[] buffer;
-        return;
-    }
-
     if (database->file_size != size)
     {
         error_log("Database file size mismatch");
@@ -181,6 +174,15 @@ void db_core::relocate(Database *db, int diff)
         relocate_field(&stop->name, diff);
         relocate_field(&stop->street, diff);
         relocate_field(&stop->subname, diff);
+    }
+
+    debug_log("relocating shapes...");
+
+    for (uint16 i = 0; i < db->shapes.size(); i++)
+    {
+        ShapeEntry *shape = &db->shapes[i];
+
+        relocate_field(&shape->packed_points, diff);
     }
 }
 

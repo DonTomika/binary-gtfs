@@ -26,6 +26,11 @@ enum Features : uint32
     FEATURE_SHAPES                      = 0x00000002,
 };
 
+enum RouteCategoryFlags : uint8
+{
+    ROUTE_CATEGORY_FLAG_PUBLIC          = 0x00000001,
+};
+
 enum StopFlags : uint8
 {
     STOP_FLAG_HAVE_WHEELCHAIR_DATA      = 0x00000001,
@@ -60,7 +65,7 @@ struct Database // (0x4C - 76 bytes)
     uint32                                   sign;                              // 0x00
     uint8                                    gen_version;                       // 0x04
     uint8                                    min_version;                       // 0x05
-    uint16                                   reserved;                          // 0x06
+    uint16                                   content_version;                   // 0x06
                                 
     uint32                                   file_size;                         // 0x08
     uint32                                   file_crc;                          // 0x0C
@@ -127,13 +132,13 @@ struct RouteEntry // (0x1A - 26 bytes)
     array<RouteLineEntry, uint8>             lines;                             // 0x15
 };
 
-struct RouteLineEntry // (0x22 - 34 bytes)
+struct RouteLineEntry // (0x23 - 35 bytes)
 {
     RouteEntry                              *route;                             // 0x00
     uint8                                    direction;                         // 0x04
     char                                    *name;                              // 0x05
-    uint8                                    time_id_logic;                     // 0x09
-    RouteLineEntry                          *continuation;                      // 0x0A
+    RouteLineEntry                          *continuation;                      // 0x09
+    uint8                                    flags;                             // 0x0D
 
     array<RouteHeadsignEntry, uint8>         headsigns;                         // 0x0E
     array<RouteStopEntry, uint8>             stops;                             // 0x13
@@ -173,7 +178,7 @@ struct LocationEntry // (0x08 - 8 bytes)
     int32                                    longitude;                         // 0x04
 };
 
-struct StopEntry // (0x19 - 25 bytes)
+struct StopEntry // (0x1A - 26 bytes)
 {
     uint16                                   id;                                // 0x00
     uint16                                   group_id;                          // 0x02
@@ -181,14 +186,16 @@ struct StopEntry // (0x19 - 25 bytes)
     char                                    *subname;                           // 0x08
     char                                    *street;                            // 0x0C
     LocationEntry                            location;                          // 0x10
-    uint8                                    flags;                             // 0x18
+    uint8                                    orientation;                       // 0x18
+    uint8                                    flags;                             // 0x19
 };
 
 struct ShapeEntry // (0x09 - 9 bytes)
 {
     uint16                                   first_stop_id;                     // 0x00
     uint16                                   next_stop_id;                      // 0x02
-    array<LocationEntry, uint8>              points;                            // 0x04
+    uint8                                    point_count;                       // 0x04
+    uint8                                   *packed_points;                     // 0x05
 };
 
 #pragma pack(pop)
