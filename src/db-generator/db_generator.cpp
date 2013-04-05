@@ -34,6 +34,21 @@ uint32 hex_to_uint32(const std::string& hex)
     return result;
 }
 
+std::vector<std::pair<int32, int32>> parse_points(std::string str)
+{
+    std::vector<std::pair<int32, int32>> result;
+
+    std::stringstream ss(str);
+    std::string lat, lon;
+
+    while (std::getline(ss, lat, ',') && std::getline(ss, lon, ','))
+    {
+        result.push_back(std::pair<int32, int32>(atoi(lat.c_str()), atoi(lon.c_str())));
+    }
+
+    return result;
+}
+
 Database *generate_db(std::string connection_string)
 {
     soci::session sql;
@@ -553,8 +568,8 @@ Database *generate_db(std::string connection_string)
         {
             soci::row const& row = *it;
 
-            std::string next_segment = row.get<std::string>(2);
-            int count = (next_segment.length() + 1) / 18;
+            std::vector<std::pair<int32, int32>> points = parse_points(row.get<std::string>(2));
+            int count = points.size();
 
             if (count > 0)
             {
@@ -575,8 +590,8 @@ Database *generate_db(std::string connection_string)
                 int32 last_lon = 0;
                 for (int k = 0; k < count; k++)
                 {
-                    int32 lat = atoi(next_segment.substr(k * 18, k * 18 + 8).c_str());
-                    int32 lon = atoi(next_segment.substr(k * 18 + 9, k * 18 + 17).c_str());
+                    int32 lat = points[k].first;
+                    int32 lon = points[k].second;
 
                     if (k == 0)
                     {

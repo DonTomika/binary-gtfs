@@ -1176,7 +1176,7 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 			
 			out_lines.println(String.format(
 					"INSERT INTO route_lines VALUES (%s, %s, %s, \"%s\", %s);",
-					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(++index), first.getDirectionId(), first.getRoute().getShortName(), Integer.toString(tripsByTravelTimes.size()) }
+					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(++index), first.getDirectionId() != null ? first.getDirectionId() : "0", first.getRoute().getShortName(), Integer.toString(tripsByTravelTimes.size()) }
 				));
 			
 			out_headsigns.println(String.format(
