@@ -58,6 +58,9 @@ public final class Trip extends IdentityBean<AgencyAndId> {
 
   @CsvField(optional = true, defaultValue = "0")
   private int tripBikesAllowed = 0;
+  
+  @CsvField(optional = true)
+  private String tripsBkkRef;
 
   public Trip() {
 
@@ -75,6 +78,7 @@ public final class Trip extends IdentityBean<AgencyAndId> {
     this.shapeId = obj.shapeId;
     this.wheelchairAccessible = obj.wheelchairAccessible;
     this.tripBikesAllowed = obj.tripBikesAllowed;
+    this.tripsBkkRef = obj.tripsBkkRef;
   }
 
   public AgencyAndId getId() {
@@ -164,6 +168,16 @@ public final class Trip extends IdentityBean<AgencyAndId> {
   public int getTripBikesAllowed() {
     return tripBikesAllowed;
   }
+  
+  public void setTripsBkkRef(String tripsBkkRef) {
+    this.tripsBkkRef = tripsBkkRef;
+  }
+
+  public String getTripsBkkRef() {
+    return tripsBkkRef;
+  }
+  
+  
 
   public String toString() {
     return "<Trip " + getId() + ">";

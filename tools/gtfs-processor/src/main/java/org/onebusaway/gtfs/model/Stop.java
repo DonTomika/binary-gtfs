@@ -68,6 +68,12 @@ public final class Stop extends IdentityBean<AgencyAndId> {
   
   @CsvField(name="vehicle_type", optional = true)
   private int vehicleType = MISSING_VALUE;
+  
+  @CsvField(optional = true)
+  private String street;
+  
+  @CsvField(optional = true)
+  private int angle = MISSING_VALUE;
 
   public Stop() {
 
@@ -88,6 +94,8 @@ public final class Stop extends IdentityBean<AgencyAndId> {
     this.direction = obj.direction;
     this.timezone = obj.timezone;
     this.vehicleType = obj.vehicleType;
+    this.street = obj.street;
+    this.angle = obj.angle;
   }
 
   public AgencyAndId getId() {
@@ -213,5 +221,25 @@ public final class Stop extends IdentityBean<AgencyAndId> {
   
   public void clearVehicleType() {
     vehicleType = MISSING_VALUE;
+  }
+  
+  public String getStreet() {
+	  return street;
+  }
+  
+  public void setStreet(String street) {
+	  this.street = street;
+  }
+  
+  public int getAngle() {
+	  return angle;
+  }
+  
+  public void setAngle(int angle) {
+	  this.angle = angle;
+  }
+  
+  public void clearAngle() {
+	  this.angle = MISSING_VALUE;
   }
 }

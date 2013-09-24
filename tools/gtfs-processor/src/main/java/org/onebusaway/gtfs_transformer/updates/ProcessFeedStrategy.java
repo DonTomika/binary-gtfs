@@ -25,15 +25,19 @@ import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.TimeZone;
 
 import org.onebusaway.collections.FactoryMap;
 import org.onebusaway.csv_entities.schema.annotations.CsvField;
+import org.onebusaway.gtfs.model.Agency;
 import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.gtfs.model.Route;
 import org.onebusaway.gtfs.model.ServiceCalendar;
@@ -66,6 +70,12 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 	@CsvField(ignore = true)
 	private PrintStream out;
 	
+	@CsvField(ignore = true)
+	private boolean is_dkv = false;
+	
+	@CsvField(ignore = true)
+	private boolean is_bkv = false;
+	
 	public ProcessFeedStrategy(File outfile)
 	{
 		try
@@ -85,6 +95,41 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 	@Override
 	public void run(TransformContext context, GtfsMutableRelationalDao dao)
 	{
+		
+		Iterator<Agency> itr = dao.getAllAgencies().iterator();
+		while (itr.hasNext())
+		{
+			Agency agency = itr.next();
+			
+			if (agency.getId().contains("DKV"))
+				is_dkv = true;
+			
+			if (agency.getId().contains("BKK"))
+				is_bkv = true;
+		}
+		
+		if (is_bkv)
+		{
+			Calendar cal = Calendar.getInstance();
+			cal.add(Calendar.MONTH, 1);
+			ServiceDate cutoff = new ServiceDate(cal);
+			
+			// trim stuff
+			/*for (ServiceCalendar calendar : dao.getAllCalendars())
+			{
+				if (calendar.getStartDate().compareTo(cutoff) > 0)
+				{
+					for (ServiceCalendarDate date : dao.getCalendarDatesForServiceId(calendar.getServiceId());
+					
+					dao.removeEntity(calendar);
+					
+					
+				}
+			}*/
+			
+			UpdateLibrary.clearDaoCache(dao);
+		}
+		
 		Map<CalendarPattern, List<ServiceCalendar>> calendarsToMerge = new FactoryMap<CalendarPattern, List<ServiceCalendar>>(new ArrayList<ServiceCalendar>());
 		
 		for (ServiceCalendar calendar : dao.getAllCalendars())
@@ -115,6 +160,24 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 				exception_types[i] = exception.getExceptionType();
 			}
 			
+			// sort
+			for (int i = 0; i < n; i++)
+			{
+				for (int j = 1; j < n - i; j++)
+				{
+					if (exception_dates[j - 1].getAsDate().getTime() > exception_dates[j].getAsDate().getTime())
+					{
+						ServiceDate temp = exception_dates[j - 1];
+						exception_dates[j - 1] = exception_dates[j];
+						exception_dates[j] = temp;
+						
+						int temp2 = exception_types[j - 1];
+						exception_types[j - 1] = exception_types[j];
+						exception_types[j] = temp2;
+					}
+				}
+			}
+			
 			CalendarPattern pattern = new CalendarPattern(monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date, exception_dates, exception_types);
 			calendarsToMerge.get(pattern).add(calendar);
 		}
@@ -143,6 +206,137 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 					dao.removeEntity(calendar_date);
 				
 				dao.removeEntity(next);
+			}
+		}
+		
+		UpdateLibrary.clearDaoCache(dao);
+		
+		int counter = 0;
+		
+		// simplify calendars
+		if (is_dkv)
+		{
+			for (ServiceCalendar calendar : dao.getAllCalendars())
+			{
+				List<ServiceCalendarDate> exceptions = dao.getCalendarDatesForServiceId(calendar.getServiceId());
+				int days_yes[] = new int[7];
+				int days_not[] = new int[7];
+				
+				ServiceDate start = calendar.getStartDate();
+				do
+				{
+					int dow = start.getAsCalendar(TimeZone.getDefault()).get(Calendar.DAY_OF_WEEK);
+					
+					boolean valid = false;
+					if (dow == Calendar.SUNDAY && calendar.getSunday() > 0)
+						valid = true;
+					else if (dow == Calendar.MONDAY && calendar.getMonday() > 0)
+						valid = true;
+					else if (dow == Calendar.TUESDAY && calendar.getTuesday() > 0)
+						valid = true;
+					else if (dow == Calendar.WEDNESDAY && calendar.getWednesday() > 0)
+						valid = true;
+					else if (dow == Calendar.THURSDAY && calendar.getThursday() > 0)
+						valid = true;
+					else if (dow == Calendar.FRIDAY && calendar.getFriday() > 0)
+						valid = true;
+					else if (dow == Calendar.SATURDAY && calendar.getSaturday() > 0)
+						valid = true;
+					
+					for (ServiceCalendarDate exception : exceptions)
+					{
+						if (!exception.getDate().equals(start))
+							continue;
+						
+						if (exception.getExceptionType() == 1)
+							valid = true;
+						else if (exception.getExceptionType() == 2)
+							valid = false;
+					}
+					
+					if (valid)
+						days_yes[dow - 1]++;
+					else
+						days_not[dow - 1]++;
+					
+					start = start.next();
+				} while (start.compareTo(calendar.getEndDate()) <= 0);
+				
+				for (int dow = 1; dow <= 7; dow++)
+				{
+					System.out.println("Calendar " + calendar.getServiceId() + ", dow: " + dow + ", yes: " + days_yes[dow - 1] + ", not: " + days_not[dow - 1]);
+					
+					if (days_yes[dow - 1] > days_not[dow - 1])
+					{
+						switch (dow)
+						{
+							case Calendar.SUNDAY:
+								calendar.setSunday(1);
+								break;
+							case Calendar.MONDAY:
+								calendar.setMonday(1);
+								break;
+							case Calendar.TUESDAY:
+								calendar.setTuesday(1);
+								break;
+							case Calendar.WEDNESDAY:
+								calendar.setWednesday(1);
+								break;
+							case Calendar.THURSDAY:
+								calendar.setThursday(1);
+								break;
+							case Calendar.FRIDAY:
+								calendar.setFriday(1);
+								break;
+							case Calendar.SATURDAY:
+								calendar.setSaturday(1);
+								break;
+						}
+						
+						// add removes
+						start = calendar.getStartDate();
+						do
+						{
+							int dow2 = start.getAsCalendar(TimeZone.getDefault()).get(Calendar.DAY_OF_WEEK);
+							
+							boolean found = false;
+							for (ServiceCalendarDate exception : exceptions)
+							{
+								if (exception.getDate().equals(start) && exception.getExceptionType() == 1)
+									found = true;
+							}
+							
+							if (dow2 == dow && !found)
+							{
+								ServiceCalendarDate temp = new ServiceCalendarDate();
+								temp.setId(1000000 + ++counter);
+								temp.setServiceId(calendar.getServiceId());
+								temp.setDate(start);
+								temp.setExceptionType(2);
+								
+								//exceptions.add(temp);
+								dao.saveEntity(temp);
+							}
+							
+							start = start.next();
+						} while (start.compareTo(calendar.getEndDate()) <= 0);
+						
+						// remove adds
+						Iterator<ServiceCalendarDate> itr2 = exceptions.iterator();
+						while (itr2.hasNext())
+						{
+							ServiceCalendarDate exception = itr2.next();
+							
+							int dow2 = exception.getDate().getAsCalendar(TimeZone.getDefault()).get(Calendar.DAY_OF_WEEK);
+							
+							if (dow2 == dow && exception.getExceptionType() == 1)
+							{
+								//itr2.remove();
+								dao.removeEntity(exception);
+							}
+						}
+					}
+				}
 			}
 		}
 		
@@ -533,6 +727,7 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 		out.println("	`direction`  INTEGER(11) NOT NULL,");
 		out.println("	`name`  TEXT NOT NULL,");
 		out.println("	`stop_times_count`  INTEGER(11) NOT NULL,");
+		out.println("	`flags`  INTEGER(11) NOT NULL,");
 		out.println("	PRIMARY KEY (`route_id`, `line_id`)");
 		out.println(");");
 		out.println("");
@@ -835,13 +1030,24 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 		out.println("INSERT INTO `calendar_school_holidays` VALUES ('3', '2013-06-15', '2013-08-31', 'Nyári szünet');");
 		out.println("");
 		
-		out.println("INSERT INTO `route_categories` VALUES ('1', 'Metró', 'E8E8E8', 1);");
-		out.println("INSERT INTO `route_categories` VALUES ('2', 'Villamos', 'DBD229', 1);");
-		out.println("INSERT INTO `route_categories` VALUES ('3', 'Trolibusz', 'E9473E', 1);");
-		out.println("INSERT INTO `route_categories` VALUES ('4', 'Busz', '3E96D1', 1);");
-		out.println("INSERT INTO `route_categories` VALUES ('5', 'Éjszakai', '999999', 1);");
-		out.println("INSERT INTO `route_categories` VALUES ('6', 'Hév', 'E8E8E8', 1);");
-		out.println("INSERT INTO `route_categories` VALUES ('7', 'Hajó', 'E8E8E8', 1);");
+		if (is_dkv)
+		{
+			out.println("INSERT INTO `route_categories` VALUES ('1', 'Villamos', 'DBD229', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('2', 'Trolibusz', 'E9473E', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('3', 'Busz', '3E96D1', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('4', 'Áruházi járatok', 'D07F66', 0);");
+			out.println("INSERT INTO `route_categories` VALUES ('5', 'Egyéb', '808080', 0);");
+		}
+		else
+		{
+			out.println("INSERT INTO `route_categories` VALUES ('1', 'Metró', 'E8E8E8', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('2', 'Villamos', 'DBD229', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('3', 'Trolibusz', 'E9473E', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('4', 'Busz', '3E96D1', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('5', 'Éjszakai', '999999', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('6', 'Hév', 'E8E8E8', 1);");
+			out.println("INSERT INTO `route_categories` VALUES ('7', 'Hajó', 'E8E8E8', 1);");
+		}
 		
 		out.println("");
 		
@@ -933,6 +1139,8 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 		
 		Map<String, Integer> group_by_name = new HashMap<String, Integer>();
 		
+		Map<String, Integer> group_by_stop_id = new HashMap<String, Integer>();
+		
 		int group_counter = 0;
 		int index = 0;
 		for (Stop stop : dao.getAllStops())
@@ -949,6 +1157,15 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 					group_id = group_by_station.get(stop.getParentStation());
 				else
 					group_by_station.put(stop.getParentStation(), group_id = ++group_counter);
+			}
+			else if (is_dkv)
+			{
+				String gid = stop.getId().getId().substring(0, 5);
+				
+				if (group_by_name.containsKey(gid))
+					group_id = group_by_name.get(gid);
+				else
+					group_by_name.put(gid, group_id = ++group_counter);
 			}
 			else
 			{
@@ -977,14 +1194,22 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 				flags = 1;
 				
 			out.println(String.format(
-					"INSERT INTO stops VALUES (%s, \"%s\", \"%s\", \"%s\", %s, %s, %s, %s);",
-					new Object[] { Integer.toString(++index), stop.getName(), "", "", Integer.toString(group_id), Integer.toString((int) (stop.getLat() * 1000000.0 + 0.5)), Integer.toString((int) (stop.getLon() * 1000000.0 + 0.5)), Integer.toString(flags) }
+					"INSERT INTO stops VALUES (%s, %s, %s, %s, %s, %s, %s, %s);",
+					new Object[] { Integer.toString(++index), getEscapedString(stop.getName()), getEscapedString(stop.getDesc()), getEscapedString(stop.getStreet()), Integer.toString(group_id), Integer.toString((int) (stop.getLat() * 1000000.0 + 0.5)), Integer.toString((int) (stop.getLon() * 1000000.0 + 0.5)), Integer.toString(flags) }
 				));
 			
 			stop_to_id.put(stop, index);
 		}
 	}
 	
+	private Object getEscapedString(String str)
+	{
+		if (str == null)
+			return "\"\"";
+		else
+			return '"' + str.replace('"', '\"') + '"';
+	}
+
 	private void generateRoutes(GtfsMutableRelationalDao dao) throws IOException
 	{
 		final Map<Route, Integer> route_to_category_id = new HashMap<Route, Integer>();
@@ -996,28 +1221,53 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 			if (route.getShortName() == null)
 				route.setShortName("UNK");
 			
-			switch (route.getType())
+			if (is_dkv)
 			{
-				case 0:
-					category_id = 2;
-					break;
-				case 1:
-					category_id = 1;
-					break;
-				case 2:
-					category_id = 6;
-					break;
-				case 3:
-					if (route.getColor() != null && route.getColor().equals("333333"))
-						category_id = 5;
-					else if (route.getColor() != null && route.getColor().equals("FF1818"))
-						category_id = 3;
-					else
-						category_id = 4;
-					break;
-				case 4:
-					category_id = 7;
-					break;
+				switch (route.getType())
+				{
+					case 0:
+						category_id = 1;
+						break;
+					case 3:
+						if (route.getAgency().getId().contains("HAJDU-VOLAN") || route.getAgency().getId().contains("TESCO"))
+							category_id = 4; // auchan/tesco
+						else if (route.getShortName().equals("A1") || route.getShortName().startsWith("MUZ") || route.getAgency().getId().contains("KOMAROMI"))
+							category_id = 5; // egyéb
+						else if (route.getColor() != null && route.getColor().equals("FF1818"))
+							category_id = 2; // trolibusz
+						else
+							category_id = 3; // busz
+						break;
+					case 800:
+						category_id = 2;
+						break;
+				}
+			}
+			else
+			{
+				switch (route.getType())
+				{
+					case 0:
+						category_id = 2;
+						break;
+					case 1:
+						category_id = 1;
+						break;
+					case 2:
+						category_id = 6;
+						break;
+					case 3:
+						if (route.getColor() != null && route.getColor().equals("333333"))
+							category_id = 5;
+						else if (route.getColor() != null && route.getColor().equals("FF1818"))
+							category_id = 3;
+						else
+							category_id = 4;
+						break;
+					case 4:
+						category_id = 7;
+						break;
+				}
 			}
 			
 			route_to_category_id.put(route,  category_id);
@@ -1047,15 +1297,15 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 		
 		for (Route r : sorted_routes)
 		{
-			if (route_names.containsKey(r.getShortName()))
+			if (route_names.containsKey(r.getShortName() + ":" + r.getType()))
 			{
 				String basename = r.getShortName();
 				
-				int counter = route_name_counter.get(basename);
+				int counter = route_name_counter.get(basename + ":" + r.getType());
 				
 				if (counter == 1)
 				{
-					Route first = route_names.get(r.getShortName());
+					Route first = route_names.get(r.getShortName() + ":" + r.getType());
 					first.setShortName(r.getShortName() + "\u00B9");
 					r.setShortName(r.getShortName() + "\u00B2");
 				}
@@ -1074,12 +1324,12 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 				else if (counter == 8)
 					r.setShortName(r.getShortName() + "\u2079");
 				
-				route_name_counter.put(basename, counter + 1);
+				route_name_counter.put(basename + ":" + r.getType(), counter + 1);
 			}
 			else
 			{
-				route_names.put(r.getShortName(), r);
-				route_name_counter.put(r.getShortName(), 1);
+				route_names.put(r.getShortName() + ":" + r.getType(), r);
+				route_name_counter.put(r.getShortName() + ":" + r.getType(), 1);
 			}
 		}
 		
@@ -1090,10 +1340,61 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 			int category_id = route_to_category_id.get(route);
 			String color = transformColor(route.getColor());
 			String short_name = route.getShortName();
+			String long_name = route.getDesc();
+			String desc = route.getLongName();
+			
+			// hax for dkv
+			if (is_dkv && (category_id == 4 || category_id == 5))
+			{
+				if (short_name.startsWith("AU"))
+					color = transformColor("ED7175");
+				else if (short_name.startsWith("T"))
+					color = transformColor("61C1F4");
+				else if (short_name.startsWith("A"))
+					color = transformColor("ED69FF");
+				else if (short_name.startsWith("GGY"))
+					color = transformColor("999999");
+			}
+			
+			if (is_dkv)
+			{
+				desc = "";
+				long_name = long_name.replace(") (", ", ");
+				
+				// move comments in long_name to desc
+				if (long_name != null && long_name.contains("(") && long_name.endsWith(")"))
+				{
+					String new_long_name = long_name.substring(0, long_name.lastIndexOf('('));
+					String new_desc = long_name.substring(long_name.lastIndexOf('(') + 1, long_name.length() - 1).replace("IDEIGLENES", "ideiglenes").replace("GYORSJÁRAT", "gyorsjárat");
+					
+					if (desc == null || desc.isEmpty())
+					{
+						long_name = new_long_name;
+						desc = new_desc;
+					}
+					else if (desc.equalsIgnoreCase(new_desc))
+					{
+						long_name = new_long_name;
+					}
+					else if (desc.toLowerCase().contains(new_desc.toLowerCase()))
+					{
+						long_name = new_long_name;
+						desc = new_desc;
+					}
+					else
+					{
+						long_name = new_long_name;
+						desc = desc + ", " + new_desc;
+					}
+				}
+			}
+			
+			desc = desc == null ? null : desc.trim();
+			long_name = long_name == null ? long_name : long_name.trim();
 			
 			out.println(String.format(
-					"INSERT INTO routes VALUES (%s, \"%s\", \"%s\", \"%s\", \"%s\", %s);",
-					new Object[] { Integer.toString(route_id), short_name, route.getDesc(), route.getLongName() == null ? "" : route.getLongName(), color, Integer.toString(category_id) }
+					"INSERT INTO routes VALUES (%s, %s, %s, %s, \"%s\", %s);",
+					new Object[] { Integer.toString(route_id), getEscapedString(short_name), getEscapedString(long_name), getEscapedString(desc), color, Integer.toString(category_id) }
 				));
 			
 			route_to_id.put(route, route_id);
@@ -1174,20 +1475,31 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 			
 			List<StopTime> stopTimes = dao.getStopTimesForTrip(first);
 			
+			int line_flags = 0;
+			if (first.getTripsBkkRef() == null || first.getTripsBkkRef().length() == 0)
+				line_flags = 1;
+			
 			out_lines.println(String.format(
-					"INSERT INTO route_lines VALUES (%s, %s, %s, \"%s\", %s);",
-					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(++index), first.getDirectionId() != null ? first.getDirectionId() : "0", first.getRoute().getShortName(), Integer.toString(tripsByTravelTimes.size()) }
+					"INSERT INTO route_lines VALUES (%s, %s, %s, %s, %s, %s);",
+					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(++index), first.getDirectionId() != null ? first.getDirectionId() : "0", getEscapedString(first.getRoute().getShortName()), Integer.toString(tripsByTravelTimes.size()), Integer.toString(line_flags) }
 				));
 			
 			out_headsigns.println(String.format(
-					"INSERT INTO route_headsigns VALUES (%s, %s, %s, \"%s\");",
-					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(index), Integer.toString(0), stopTimes.get(0).getStop().getName() }
+					"INSERT INTO route_headsigns VALUES (%s, %s, %s, %s);",
+					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(index), Integer.toString(0), getEscapedString(stopTimes.get(0).getStop().getName()) }
 				));
 			
-			out_headsigns.println(String.format(
-					"INSERT INTO route_headsigns VALUES (%s, %s, %s, \"%s\");",
-					new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(index), Integer.toString(1), first.getTripHeadsign() }
-				));
+			String last_headsign = stopTimes.get(0).getStop().getName();
+			
+			if (stopTimes.size() == 0 || stopTimes.get(0).getStopHeadsign() == null)
+			{
+				out_headsigns.println(String.format(
+						"INSERT INTO route_headsigns VALUES (%s, %s, %s, %s);",
+						new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(index), Integer.toString(1), getEscapedString(first.getTripHeadsign()) }
+					));
+				
+				last_headsign = first.getTripHeadsign();
+			}
 
 			Map<TravelTimePattern, Integer> time_index_to_id = new HashMap<TravelTimePattern, Integer>();
 			
@@ -1196,12 +1508,14 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 			{
 				StopTime stopTime = stopTimes.get(i);
 				
-				if (stopTime.getStopHeadsign() != null)
+				if (stopTime.getStopHeadsign() != null && !stopTime.getStopHeadsign().equals(last_headsign))
 				{
 					out_headsigns.println(String.format(
-							"INSERT INTO route_headsigns VALUES (%s, %s, %s, \"%s\");",
-							new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(index), Integer.toString(i + 1), stopTime.getStopHeadsign() }
-							));
+							"INSERT INTO route_headsigns VALUES (%s, %s, %s, %s);",
+							new Object[] { Integer.toString(route_to_id.get(first.getRoute())), Integer.toString(index), Integer.toString(i + 1), getEscapedString(stopTime.getStopHeadsign()) }
+						));
+					
+					last_headsign = stopTime.getStopHeadsign();
 				}
 
 				String arrival_times = "";
@@ -1230,26 +1544,82 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 				
 				List<ShapePoint> points = dao.getShapePointsForShapeId(first.getShapeId());
 				
-				for (ShapePoint point : points)
+				if (stopTime.getShapeDistTraveled() >= 0)
 				{
-					double dist = point.getDistTraveled();
+					// find out the correct segment using distance_traveled
+					for (ShapePoint point : points)
+					{
+						double dist = point.getDistTraveled();
+						
+						if (dist < stopTime.getShapeDistTraveled())
+							continue;
+						
+						/*if ((int) (dist * 10000) == (int) (stopTime.getShapeDistTraveled() * 10000) && Math.abs(point.getLat() - stopTime.getStop().getLat()) < 0.0000005 && Math.abs(point.getLon() - stopTime.getStop().getLon()) < 0.0000005)
+							continue;*/
+						
+						if (Math.abs(point.getLat() - stopTime.getStop().getLat()) < 0.000001 && Math.abs(point.getLon() - stopTime.getStop().getLon()) < 0.0000001)
+							continue;
+						
+						if (i < stopTimes.size() - 1 && Math.abs(point.getLat() - stopTimes.get(i + 1).getStop().getLat()) < 0.000001 && Math.abs(point.getLon() - stopTimes.get(i + 1).getStop().getLon()) < 0.0000001)
+							continue;
+						
+						if (i < stopTimes.size() - 1 && dist >= stopTimes.get(i + 1).getShapeDistTraveled())
+							break;
+						
+						shapes += (int) (point.getLat() * 1000000.0 + 0.5) + "," + (int) (point.getLon() * 1000000.0 + 0.5) + ",";
+					}
+				}
+				else
+				{
+					// do the same with using only coordinates
+					/*int start_index = 0;
+					int end_index = 0;
 					
-					if (dist < stopTime.getShapeDistTraveled())
-						continue;
+					double best_dist = 999999999.0;
+					for (int j = 0; j < points.size(); j++)
+					{
+						ShapePoint point = points.get(j);
+						
+						double dist = getDistance(point.getLat(), point.getLon(), stopTime.getStop().getLat(), stopTime.getStop().getLon());
+						
+						if (dist < best_dist)
+						{
+							start_index = j;
+							best_dist = dist;
+						}
+					}
 					
-					/*if ((int) (dist * 10000) == (int) (stopTime.getShapeDistTraveled() * 10000) && Math.abs(point.getLat() - stopTime.getStop().getLat()) < 0.0000005 && Math.abs(point.getLon() - stopTime.getStop().getLon()) < 0.0000005)
-						continue;*/
+					if (i < stopTimes.size() - 1)
+					{
+						best_dist = 999999999.0;
+						for (int j = 0; j < points.size(); j++)
+						{
+							ShapePoint point = points.get(j);
+							
+							double dist = getDistance(point.getLat(), point.getLon(), stopTimes.get(i + 1).getStop().getLat(), stopTimes.get(i + 1).getStop().getLon());
+							
+							if (dist < best_dist)
+							{
+								end_index = j;
+								best_dist = dist;
+							}
+						}
+					}
+					else
+						end_index = start_index - 1;
 					
-					if (Math.abs(point.getLat() - stopTime.getStop().getLat()) < 0.000001 && Math.abs(point.getLon() - stopTime.getStop().getLon()) < 0.0000001)
-						continue;
+					for (int j = start_index; j <= end_index; j++)
+					{
+						ShapePoint point = points.get(j);
 					
-					if (i < stopTimes.size() - 1 && Math.abs(point.getLat() - stopTimes.get(i + 1).getStop().getLat()) < 0.000001 && Math.abs(point.getLon() - stopTimes.get(i + 1).getStop().getLon()) < 0.0000001)
-						continue;
-					
-					if (i < stopTimes.size() - 1 && dist >= stopTimes.get(i + 1).getShapeDistTraveled())
-						break;
-					
-					shapes += (int) (point.getLat() * 1000000.0 + 0.5) + "," + (int) (point.getLon() * 1000000.0 + 0.5) + ",";
+						if (Math.abs(point.getLat() - stopTime.getStop().getLat()) < 0.000001 && Math.abs(point.getLon() - stopTime.getStop().getLon()) < 0.0000001)
+							continue;
+						
+						if (i < stopTimes.size() - 1 && Math.abs(point.getLat() - stopTimes.get(i + 1).getStop().getLat()) < 0.000001 && Math.abs(point.getLon() - stopTimes.get(i + 1).getStop().getLon()) < 0.0000001)
+							continue;
+						
+						shapes += (int) (point.getLat() * 1000000.0 + 0.5) + "," + (int) (point.getLon() * 1000000.0 + 0.5) + ",";
+					}*/
 				}
 				
 				if (shapes.length() > 1)
@@ -1276,13 +1646,29 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 					{
 						int flags = trip.getWheelchairAccessible() > 0 ? trip.getWheelchairAccessible() == 1 ? 3 : 1 : 0;
 						StopTime stopTime = stopTimes2.get(0);
+						
+						Integer route_id = route_to_id.get(trip.getRoute());
+						
+						if (route_id == null)
+						{
+							System.out.println("No route for trip: " + trip.getId());
+							continue;
+						}
 					
+						ServiceCalendar calendar = dao.getCalendarForServiceId(trip.getServiceId());
+						
+						if (calendar == null)
+						{
+							System.out.println("No calendar for trip: " + trip.getId() + ", service id: " + trip.getServiceId());
+							continue;
+						}
+						
 						out_departures.println(String.format(
 								"INSERT INTO route_departures VALUES (%s, %s, %s, %s, %s, %s);",
 								new Object[] {
-										Integer.toString(route_to_id.get(trip.getRoute())),
+										Integer.toString(route_id),
 										Integer.toString(index),
-										Integer.toString(calendar_to_id.get(dao.getCalendarForServiceId(trip.getServiceId()))),
+										Integer.toString(calendar_to_id.get(calendar)),
 										Integer.toString(flags),
 										Integer.toString(stopTime.getDepartureTime()),
 										Integer.toString(time_index_to_id.get(key)) }
@@ -1298,6 +1684,22 @@ public class ProcessFeedStrategy implements GtfsTransformStrategy
 		out_departures.close();*/
 	}
 	
+	private double getDistance(double lat, double lon, double lat2, double lon2)
+	{
+		double d2r = Math.PI / 180;
+	    double dlong = (lon2 - lon) * d2r;
+	    double dlat = (lat2 - lat) * d2r;
+	    double a =
+	        Math.pow(Math.sin(dlat / 2.0), 2)
+	            + Math.cos(lat * d2r)
+	            * Math.cos(lat2 * d2r)
+	            * Math.pow(Math.sin(dlong / 2.0), 2);
+	    double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+	    double d = 6367 * c;
+
+	    return d;
+	}
+
 	private static class CalendarPattern
 	{
 		public final int _monday;
