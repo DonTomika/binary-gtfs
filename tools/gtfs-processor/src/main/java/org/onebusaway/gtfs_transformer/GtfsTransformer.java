@@ -30,7 +30,6 @@ import org.onebusaway.gtfs.serialization.GtfsReader;
 import org.onebusaway.gtfs.services.GenericMutableDao;
 import org.onebusaway.gtfs.services.GtfsMutableRelationalDao;
 import org.onebusaway.gtfs.services.GtfsRelationalDao;
-import org.onebusaway.gtfs_transformer.factory.TransformFactory;
 import org.onebusaway.gtfs_transformer.services.GtfsEntityTransformStrategy;
 import org.onebusaway.gtfs_transformer.services.GtfsTransformStrategy;
 import org.onebusaway.gtfs_transformer.services.SchemaUpdateStrategy;
@@ -59,8 +58,6 @@ public class GtfsTransformer {
   private GtfsMutableRelationalDao _dao = new GtfsRelationalDaoImpl();
 
   private String _agencyId;
-
-  private TransformFactory _transformFactory = new TransformFactory(this);
 
   public void setGtfsInputDirectory(File gtfsInputDirectory) {
     setGtfsInputDirectories(Arrays.asList(gtfsInputDirectory));
@@ -108,10 +105,6 @@ public class GtfsTransformer {
     return _dao;
   }
 
-  public TransformFactory getTransformFactory() {
-    return _transformFactory;
-  }
-
   public void run() throws Exception {
 
     if (_outputDirectory != null && !_outputDirectory.exists()
@@ -124,7 +117,6 @@ public class GtfsTransformer {
     _context.setReader(_reader);
 
     udateGtfs();
-    //writeGtfs();
   }
 
   /****
